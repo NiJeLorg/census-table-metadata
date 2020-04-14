@@ -53,9 +53,9 @@ def read_shell(path):
         clean_column_name = re.sub(r'\s+', '', col.value)
         if clean_column_name == 'Stub':
             title_column = col_number
-        elif clean_column_name == 'TableID':
+        elif clean_column_name in ('Table ID', 'TableID'):
             table_id_column = col_number
-        elif 'Line' in clean_column_name or 'Order' in clean_column_name:
+        elif clean_column_name in ('Line', 'Order'):
             # 2010 5yr uses "Order" instead of line number. >:(
             line_number_column = col_number
         col_number += 1
@@ -74,13 +74,17 @@ def read_shell(path):
 
         line_number = r_data[line_number_column].value
 
-        if table_id and line_number and r_data[line_number_column].ctype == 2:
+        if table_id and line_number and r_data[line_number_column].ctype in (1, 2):
             line_number_str = str(line_number)
+
+            if not line_number_str.strip():
+                continue
+
             if line_number_str.endswith('.7') or line_number_str.endswith('.5'):
                 # This is a subhead (not an actual data column), so we'll have to synthesize a column_id
-                column_id = "%s%05.1f" % (table_id, line_number)
+                column_id = "%s%05.1f" % (table_id, float(line_number))
             else:
-                column_id = "%s%03d" % (table_id, line_number)
+                column_id = "%s%03d" % (table_id, int(line_number))
 
             cell = sheet.cell(r, title_column)
             indent = xlsfile.xf_list[cell.xf_index].alignment.indent_level
@@ -187,6 +191,7 @@ SUBJECT_AREA_TO_TOPICS = {
     'Residence Last Year - Migration': 'migration',
     'School Enrollment': 'education',
     'Veteran Status': 'veterans',
+    'Voting-Age Population': 'citizen',
     'Computer and Internet Usage': 'computer, internet',
 
     'Housing': 'housing',
@@ -305,10 +310,15 @@ def build_topics(table):
     for k,v in TABLE_NAME_TEXT_TO_FACETS.items():
         if k in table_name.lower():
             all_areas.update(map(lambda x:x.strip(),v.split(',')))
-    return map(lambda x: x.strip(), all_areas)
+    return map(lambda x: x.strip(), sorted(all_areas))
 
 def find_denominator_column(table, rows):
-    if rows and rows[0]['column_title'].lower().startswith('total') and table and not table['table_title'].lower().startswith('median'):
+    """For most tables, the first row is a total row, and that row is the thing to use
+       to show estimates as percentages.  But a table must have at least 3 rows for
+       percentages to be meaningful -- and percentages are not meaningful for
+       median estimates, so sometimes we return None
+    """
+    if rows and len(rows) > 2 and rows[0]['column_title'].lower().startswith('total') and table and not table['table_title'].lower().startswith('median'):
         return rows[0]['column_id']
     else:
         return None
@@ -360,7 +370,7 @@ for r in range(1, sheet.nrows):
 
         table['table_id'] = table_id
 
-        external_shell_lookup = shell_lookup.get(table['table_id'], {})
+        external_shell_lookup = shell_lookup.get(table_id, {})
         if not external_shell_lookup:
             tables[table['table_id']] = None
             print("Could not find shells for table '{}', won't write that table out as its likely deleted from the release.".format(table['table_id']))
